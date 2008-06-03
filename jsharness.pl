@@ -104,12 +104,23 @@ sub print_banner {}
 package main;
 
 use Path::Class;
-my $source=file($ENV{'JSSOURCE'}||'code.js')->slurp();
+my $source=file($ENV{'JS_TEST'}||'test.js.t')->slurp();
+my @libs  = split(/\n/,file($ENV{'JS_LIBS'}||'js-libs')->slurp());
+
+my $libs;
+foreach my $lib (@libs) {
+    $libs .= file($lib)->slurp();
+}
+
 
 my $server = JSH::Server->new( 8000+ int(rand(1000)));
 $server->load_server(<<"EOF");
 <html>
-<head></head>
+<head>
+<script>
+@{[$libs]}
+</script>
+</head>
 <body>
 <pre id="results"># Javascript. TAP. Lurking Horror
 </pre>
@@ -147,7 +158,7 @@ function done() {
     req = new ActiveXObject("Microsoft.XMLHTTP");
   }
   if (req != undefined) {
-    req.onreadystatechange = function() {window.close()}
+    req.onreadystatechange = function() {}
     req.open("POST", 'http://localhost:@{[$server->port]}/done', true);
     req.send(document.getElementById('results').innerHTML);
   }
