@@ -59,6 +59,7 @@ sub pids {
 
 package JSH::Server;
 use base qw/JSH::Test::HTTP::Server::Simple HTTP::Server::Simple::CGI/;
+use Path::Class;
 
 sub load_server {
         my $self = shift;
@@ -91,10 +92,20 @@ sub handle_request {
                  print "\n";
         
                  delete $self->{'payload'}; 
+        } elsif ($ENV{'REQUEST_URI'} =~ /\/(.*\.js)$/) { 
+            my $file = $1;
+                warn "outputting content of $file";
+            if (-f $file) {
+                 print "HTTP/1.0 200 OK\n";
+                print "Content-Type: text/javascript\n\n";
+                print file($file)->slurp; 
+            } else {
+                 print "HTTP/1.0 404 not found\n";
 
+            }
                 
         } elsif($ENV{'REQUEST_URI'} ne '/favicon.ico') {
-        use YAML;
+               use YAML;
                warn YAML::Dump(\%ENV, $cgi);
 
         } 
@@ -107,19 +118,10 @@ use Path::Class;
 my $source=file($ENV{'JS_TEST'}||'test.js.t')->slurp();
 my @libs  = split(/\n/,file($ENV{'JS_LIBS'}||'js-libs')->slurp());
 
-my $libs;
-foreach my $lib (@libs) {
-    $libs .= file($lib)->slurp();
-}
-
-
 my $server = JSH::Server->new( 8000+ int(rand(1000)));
 $server->load_server(<<"EOF");
 <html>
 <head>
-<script>
-@{[$libs]}
-</script>
 </head>
 <body>
 <pre id="results"># Javascript. TAP. Lurking Horror
@@ -128,20 +130,77 @@ $server->load_server(<<"EOF");
 
 var counter = 0;
 
-function output(msg) {
-    document.getElementById("results").firstChild.appendData(msg);
+function say(msg) {
+    var output = document.getElementById("results").firstChild;
+    output.appendData(msg);
+    output.appendData("\\n");
 }
 
-function ok (exp, msg) {
-    ++counter;
-        if(eval(exp)) {
-                output("ok " + counter + " " +msg);
-                output("\\n");
-        } else {
-                output("not ok " + counter  + " " +msg);
-                output("\\n");
-        }
+function diag(msg) {
+        say("# "+msg);
 }
+
+
+var test_plan;
+
+function plan(count) {
+    test_plan = count;
+    say('1..'+test_plan);
+
+}
+
+
+
+function use_ok(path, reason) {
+    if (!reason) reason = 'Loading ' + path;
+    var used_ok = '';
+    var used_ok_msg = '';
+    var tmp = window.onerror;
+    window.onerror = function (msg,url,line) { used_ok = -1; used_ok_msg = msg + " line "+line }
+
+
+   function loaded_ok() {diag('loaded!');  _pass(reason);}
+
+   var head= document.getElementsByTagName('head')[0];
+   var script= document.createElement('script');
+   script.type= 'text/javascript';
+   script.onreadystatechange= function () {
+      if (this.readyState == 'complete') loaded_ok();
+   }
+   script.onload= loaded_ok;
+   script.src= path;
+   head.appendChild(script);
+
+
+    if (used_ok === -1) {
+        diag(used_ok_msg);
+        _fail(reason);
+    }
+
+    window.onerror= tmp;
+
+}
+
+function _pass (msg) { 
+    say("ok " + ++counter  + " " +msg);
+}
+
+function _fail (msg) { 
+    say("not ok " + ++counter  + " " +msg);
+}
+
+
+
+function ok (exp, msg) {
+    if(eval(exp)) {
+       _pass(msg);
+    } else {
+       _fail(msg);
+    }
+}
+
+
+
 
 
 
@@ -151,7 +210,9 @@ function ok (exp, msg) {
 </script>
 <script>
 function done() {
-    output("1.."+counter);
+    if (! test_plan) {
+        plan(counter);
+    }
   if (window.XMLHttpRequest) {
     req = new XMLHttpRequest();
   } else if (window.ActiveXObject) {
@@ -169,7 +230,7 @@ done();
 </html>
 EOF
 my $root = $server->started_ok();
-my $pid = open(my $ff, "|firefox -height 10 -width 10 -no-remote -P testing $root") || die "firefox fail $!";
+my $pid = open(my $ff, "|firefox -no-remote -P testing $root") || die "firefox fail $!";
 use LWP::Simple;
 my $out = "not yet";
 my $counter = 0;
@@ -179,7 +240,7 @@ while ( $counter++ < 30) {
     sleep 1;
  
  }
-kill 9, $pid;
+#kill 9, $pid;
 close($ff);
 print $out;
 exit(0);
